@@ -1,6 +1,12 @@
+from django.conf import settings
+from django.conf.urls.static import static
 from django.contrib import admin
+
+
 from django.urls import path, include
 from rest_framework_simplejwt.views import TokenRefreshView, TokenObtainPairView
+
+
 
 urlpatterns = [
     path('admin/', admin.site.urls),
@@ -9,3 +15,4 @@ urlpatterns = [
     path('api/token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
     # All urls from full_emr app will be prefixed with /api/
 ]
+urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
