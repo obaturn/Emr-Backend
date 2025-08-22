@@ -1,17 +1,16 @@
 import re
 from datetime import timedelta
-from venv import logger
-
+import logging
 from django.utils import timezone
 from django.contrib.auth import get_user_model, authenticate
 from django.contrib.auth.password_validation import validate_password
-from pip._internal.utils import logging
 from rest_framework import serializers
 from rest_framework_simplejwt.tokens import RefreshToken
 from .models import User, AddPatients, Report, Appointment, Invitation
 
+logger = logging.getLogger(__name__)
 
-user = get_user_model()
+User = get_user_model()
 
 class CreateAccountSerializer(serializers.ModelSerializer):
     password = serializers.CharField(
@@ -68,6 +67,7 @@ class CreateAccountSerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         validated_data.pop('password2')
         user = User.objects.create_user(**validated_data)
+        logger.info(f"User created: {user.email} (ID: {user.id})")
         return user
 
 class LoginSerializer(serializers.Serializer):
@@ -90,6 +90,7 @@ class LoginSerializer(serializers.Serializer):
             )
 
             if not user:
+                logger.error(f"Login failed for email: {email}")
                 raise serializers.ValidationError(
                     "Unable to login with provided credentials.",
                     code='authorization'
@@ -109,6 +110,7 @@ class LoginSerializer(serializers.Serializer):
             user.last_login_at = timezone.now()
             user.save()
 
+            logger.info(f"User logged in: {user.email} (ID: {user.id})")
             return {
                 'user': {
                     'id': user.id,
@@ -124,22 +126,27 @@ class LoginSerializer(serializers.Serializer):
                 }
             }
         else:
+            logger.error("Login attempt missing email or password")
             raise serializers.ValidationError(
                 'Must include "email" and "password".',
                 code='authorization'
             )
 
 class AddPatientSerializer(serializers.ModelSerializer):
+    name = serializers.SerializerMethodField(read_only=True)
+    dateOfBirth = serializers.DateField(source='dob', read_only=True)
+    id = serializers.IntegerField(read_only=True)
+
     class Meta:
         model = AddPatients
-        name = serializers.SerializerMethodField(read_only=True)
-        dateOfBirth = serializers.DateField(source='dob', read_only=True)
         fields = [
-            'id', 'first_name', 'last_name', 'email', 'phone', 'dob', 'age', 'gender',
-            'address', 'city', 'pincode', 'aadhaar', 'remarks', 'category', 'created_at', 'updated_at','emergency_contact'
+            'id', 'first_name', 'last_name', 'name', 'email', 'phone', 'dob', 'dateOfBirth', 'age', 'gender',
+            'address', 'city', 'pincode', 'aadhaar', 'remarks', 'category', 'created_at', 'updated_at', 'emergency_contact'
         ]
-        read_only_fields = ['id', 'created_at', 'updated_at']
+        read_only_fields = ['id', 'created_at', 'updated_at', 'name', 'dateOfBirth']
         extra_kwargs = {
+            'first_name': {'required': True},
+            'last_name': {'required': True},
             'dob': {'required': False, 'allow_null': True},
             'email': {'required': False, 'allow_null': True},
             'phone': {'required': False, 'allow_null': True},
@@ -149,16 +156,37 @@ class AddPatientSerializer(serializers.ModelSerializer):
             'pincode': {'required': False, 'allow_null': True},
             'aadhaar': {'required': False, 'allow_null': True},
             'remarks': {'required': False, 'allow_null': True},
+            'emergency_contact': {'required': False, 'allow_null': True},
         }
 
     def get_name(self, obj):
-            return f"{obj.first_name} {obj.last_name}"
+        first_name = obj.first_name or ""
+        last_name = obj.last_name or ""
+        full_name = f"{first_name} {last_name}".strip()
+        if not full_name:
+            logger.warning(f"Patient ID {obj.id} has no first_name or last_name")
+            return "Unnamed Patient"
+        return full_name
+
     def validate_phone(self, value):
         if value and not value.isdigit():
-            raise serializers.ValidationError('Phone Number must contain only digits')
+            raise serializers.ValidationError('Phone number must contain only digits')
         if value and len(value) < 7:
             raise serializers.ValidationError('Phone number must be at least 7 digits')
         return value
+
+    def validate(self, data):
+        first_name = data.get('first_name', '')
+        last_name = data.get('last_name', '')
+        if not first_name or not last_name:
+            logger.error(f"Patient creation failed: first_name='{first_name}', last_name='{last_name}'")
+            raise serializers.ValidationError("Both first_name and last_name are required.")
+        return data
+
+    def create(self, validated_data):
+        patient = super().create(validated_data)
+        logger.info(f"Patient created: {patient.first_name} {patient.last_name} (ID: {patient.id})")
+        return patient
 
 class ReportSerializer(serializers.ModelSerializer):
     generated_by = serializers.StringRelatedField()
@@ -188,19 +216,52 @@ class AppointmentSerializer(serializers.ModelSerializer):
         write_only=True
     )
     doctor_name = serializers.CharField(source='doctor.get_full_name', read_only=True)
+    patient_name = serializers.SerializerMethodField(read_only=True)
 
     class Meta:
         model = Appointment
         fields = [
-            'id', 'patient', 'patient_id', 'doctor', 'doctor_name', 'date', 'time', 'duration',
+            'id', 'patient', 'patient_id', 'patient_name', 'doctor', 'doctor_name', 'date', 'time', 'duration',
             'type', 'status', 'symptoms', 'notes', 'createdAt', 'updatedAt'
         ]
-        read_only_fields = ['id', 'createdAt', 'updatedAt', 'doctor']  # Doctor auto-set to current user on create
+        read_only_fields = ['id', 'createdAt', 'updatedAt', 'doctor', 'patient_name']
+
+    def get_patient_name(self, obj):
+        if obj.patient:
+            patient_name = f"{obj.patient.first_name or ''} {obj.patient.last_name or ''}".strip()
+            if not patient_name:
+                logger.warning(f"Appointment ID {obj.id} has patient ID {obj.patient.id} with no name")
+                return "Unnamed Patient"
+            return patient_name
+        logger.error(f"Appointment ID {obj.id} has no associated patient")
+        return "Unknown Patient"
+
+    def validate(self, data):
+        if 'request' not in self.context or not self.context['request'].user.is_authenticated:
+            logger.error("No authenticated user in AppointmentSerializer context")
+            raise serializers.ValidationError("Authenticated user required to create appointment")
+        patient = data.get('patient')
+        if not patient:
+            logger.error("No patient provided for appointment creation")
+            raise serializers.ValidationError("Patient is required")
+        if not patient.first_name or not patient.last_name:
+            logger.warning(f"Patient ID {patient.id} has incomplete name: {patient.first_name} {patient.last_name}")
+        return data
 
     def create(self, validated_data):
-        # Auto-assign the current doctor (assuming the API caller is the doctor)
-        validated_data['doctor'] = self.context['request'].user
-        return super().create(validated_data)
+        doctor = self.context['request'].user
+        if not doctor.is_authenticated:
+            logger.error("Attempted to create appointment with unauthenticated user")
+            raise serializers.ValidationError("Cannot create appointment without an authenticated user")
+        if doctor.role not in ['doctor', 'nurse']:
+            logger.error(f"User {doctor.id} with role {doctor.role} attempted to create appointment")
+            raise serializers.ValidationError("Only doctors or nurses can create appointments")
+        validated_data['doctor'] = doctor
+        patient = validated_data['patient']
+        logger.debug(f"Creating appointment for patient {patient.id} ({patient.first_name} {patient.last_name}) by user {doctor.id}")
+        appointment = super().create(validated_data)
+        logger.info(f"Appointment {appointment.id} created for patient {patient.id} ({patient.first_name} {patient.last_name})")
+        return appointment
 
 class InvitationSerializer(serializers.ModelSerializer):
     patient = AddPatientSerializer(read_only=True)
@@ -213,13 +274,23 @@ class InvitationSerializer(serializers.ModelSerializer):
         source='patient',
         write_only=True
     )
+
     class Meta:
         model = Invitation
-        fields = ['id', 'patient', 'patient_id', 'doctor', 'invitedDate', 'preferredDates', 'status', 'createdAt','invitedBy']
+        fields = ['id', 'patient', 'patient_id', 'doctor', 'invitedDate', 'preferredDates', 'status', 'createdAt', 'invitedBy']
         read_only_fields = ['id', 'doctor', 'invitedDate', 'createdAt']
 
-        def create(self, validated_data):
-            validated_data['doctor'] = self.context['request'].user
-            return super().create(validated_data)
+    def validate(self, data):
+        patient = data.get('patient')
+        if not patient:
+            logger.error("No patient provided for invitation creation")
+            raise serializers.ValidationError("Patient is required")
+        if not patient.first_name or not patient.last_name:
+            logger.warning(f"Patient ID {patient.id} has incomplete name: {patient.first_name} {patient.last_name}")
+        return data
 
-
+    def create(self, validated_data):
+        validated_data['doctor'] = self.context['request'].user
+        invitation = super().create(validated_data)
+        logger.info(f"Invitation {invitation.id} created for patient {invitation.patient.id} ({invitation.patient.first_name} {invitation.patient.last_name})")
+        return invitation

@@ -18,8 +18,10 @@ from openpyxl import Workbook
 import logging
 
 from .models import AddPatients, Report, User, Appointment, Invitation
-from .serializer import CreateAccountSerializer, LoginSerializer, AddPatientSerializer, ReportSerializer, \
+from .serializer import (
+    CreateAccountSerializer, LoginSerializer, AddPatientSerializer, ReportSerializer,
     GenerateReportSerializer, AppointmentSerializer, InvitationSerializer
+)
 
 logger = logging.getLogger(__name__)
 
@@ -30,10 +32,8 @@ class CreateAccountView(generics.CreateAPIView):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         user = serializer.save()
-
-        # Generate JWT tokens
         refresh = RefreshToken.for_user(user)
-
+        logger.info(f"Account created for user: {user.email} (ID: {user.id})")
         return Response({
             'user': {
                 'id': user.id,
@@ -48,41 +48,37 @@ class CreateAccountView(generics.CreateAPIView):
             }
         }, status=status.HTTP_201_CREATED)
 
-
 class LoginView(generics.GenericAPIView):
     serializer_class = LoginSerializer
 
     def post(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
+        logger.info(f"Login successful for user: {serializer.validated_data['user']['email']}")
         return Response(serializer.validated_data, status=status.HTTP_200_OK)
-
 
 class IsDoctorOrNurse(permissions.BasePermission):
     def has_permission(self, request, view):
         return request.user.is_authenticated and request.user.role in ["doctor", "nurse"]
 
-
 class IsDoctor(permissions.BasePermission):
-    """Permission to only allow doctors to perform an action."""
     def has_permission(self, request, view):
         return request.user.is_authenticated and request.user.role == "doctor"
-
 
 class AddPatientsView(generics.CreateAPIView):
     serializer_class = AddPatientSerializer
     queryset = AddPatients.objects.all()
-    permission_classes = [IsDoctorOrNurse]
+    permission_classes = [IsAuthenticated, IsDoctorOrNurse]
 
     def create(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        serializer.save()
+        patient = serializer.save()
+        logger.info(f"Patient added: {patient.first_name} {patient.last_name} (ID: {patient.id}) by user {request.user.id}")
         return Response({
             'message': 'Patient added successfully',
             'patient': serializer.data
         }, status=status.HTTP_201_CREATED)
-
 
 class ListPatientsView(generics.ListAPIView):
     serializer_class = AddPatientSerializer
@@ -98,23 +94,23 @@ class ListPatientsView(generics.ListAPIView):
                 Q(email__icontains=search) |
                 Q(phone__icontains=search)
             )
+        logger.debug(f"Fetching patients for user {self.request.user.id}, search: {search or 'none'}")
         return queryset
-
 
 class PatientDetailView(generics.RetrieveAPIView):
     serializer_class = AddPatientSerializer
     queryset = AddPatients.objects.all()
-
+    permission_classes = [IsAuthenticated, IsDoctorOrNurse]
 
 class DeletePatientView(generics.DestroyAPIView):
     serializer_class = AddPatientSerializer
     queryset = AddPatients.objects.all()
-
+    permission_classes = [IsAuthenticated, IsDoctorOrNurse]
 
 class UpdatePatientView(generics.UpdateAPIView):
     serializer_class = AddPatientSerializer
     queryset = AddPatients.objects.all()
-
+    permission_classes = [IsAuthenticated, IsDoctorOrNurse]
 
 class IsAuthorizedForReports(permissions.BasePermission):
     def has_permission(self, request, view):
@@ -128,8 +124,8 @@ class IsAuthorizedForReports(permissions.BasePermission):
             return True
         if role == 'pharmacy' and category in ['administrative', 'financial']:
             return True
+        logger.warning(f"User {request.user.id} with role {role} denied access to reports with category {category}")
         return False
-
 
 class ListReportsView(generics.ListAPIView):
     serializer_class = ReportSerializer
@@ -140,8 +136,8 @@ class ListReportsView(generics.ListAPIView):
         category = self.request.query_params.get('category')
         if category:
             queryset = queryset.filter(name__icontains=category)
+        logger.debug(f"Fetching reports for user {self.request.user.id}, category: {category or 'none'}")
         return queryset
-
 
 class GenerateReportView(generics.CreateAPIView):
     serializer_class = GenerateReportSerializer
@@ -184,6 +180,7 @@ class GenerateReportView(generics.CreateAPIView):
                 for patient in patients:
                     writer.writerow([patient.id, patient.first_name, patient.last_name, patient.age, patient.gender])
 
+        logger.debug(f"Generated report file: {file_path}")
         return f"reports/{file_name}"
 
     def create(self, request, *args, **kwargs):
@@ -191,13 +188,11 @@ class GenerateReportView(generics.CreateAPIView):
         serializer.is_valid(raise_exception=True)
         params = serializer.validated_data.copy()
 
-        # Convert date objects to strings for JSON serialization
         if 'date_range_start' in params and params['date_range_start']:
             params['date_range_start'] = params['date_range_start'].isoformat()
         if 'date_range_end' in params and params['date_range_end']:
             params['date_range_end'] = params['date_range_end'].isoformat()
 
-        # Fetch patient data with timezone-aware filtering
         patients = AddPatients.objects.all()
         if params.get('date_range_start'):
             start_date = datetime.strptime(params['date_range_start'], '%Y-%m-%d')
@@ -210,7 +205,6 @@ class GenerateReportView(generics.CreateAPIView):
         if params.get('department') and params['department'] != 'all':
             patients = patients.filter(category=params['department'])
 
-        # Generate file
         file_path = self.generate_file(
             params['name'],
             params['format'],
@@ -218,7 +212,6 @@ class GenerateReportView(generics.CreateAPIView):
             params
         )
 
-        # Save to model
         report = Report.objects.create(
             name=params['name'],
             generated_by=request.user,
@@ -226,9 +219,8 @@ class GenerateReportView(generics.CreateAPIView):
             parameters=params,
             format=params['format']
         )
-
+        logger.info(f"Report {report.id} created by user {request.user.id}: {params['name']}")
         return Response(ReportSerializer(report).data, status=status.HTTP_201_CREATED)
-
 
 class ViewReportView(generics.RetrieveAPIView):
     queryset = Report.objects.all()
@@ -238,12 +230,14 @@ class ViewReportView(generics.RetrieveAPIView):
     def retrieve(self, request, *args, **kwargs):
         report = self.get_object()
         if report.generated_by != request.user:
+            logger.error(f"User {request.user.id} attempted to access report {report.id} not owned")
             raise Http404("Report not found")
         file_path = os.path.join(settings.MEDIA_ROOT, report.file_path.name)
         if not os.path.exists(file_path):
+            logger.error(f"Report file missing: {file_path}")
             raise Http404("File not found")
+        logger.debug(f"Serving report file: {file_path} to user {request.user.id}")
         return FileResponse(open(file_path, 'rb'), as_attachment=True, filename=report.file_path.name)
-
 
 class RetrieveReportDataView(generics.RetrieveAPIView):
     queryset = Report.objects.all()
@@ -280,8 +274,9 @@ class RetrieveReportDataView(generics.RetrieveAPIView):
             patient_data = [
                 {
                     'id': patient.id,
-                    'first_name': patient.first_name,
-                    'last_name': patient.last_name,
+                    'first_name': patient.first_name or "Unknown",
+                    'last_name': patient.last_name or "Unknown",
+                    'name': f"{patient.first_name or 'Unknown'} {patient.last_name or 'Unknown'}".strip(),
                     'age': patient.age,
                     'gender': patient.gender,
                     'category': patient.category,
@@ -300,7 +295,6 @@ class RetrieveReportDataView(generics.RetrieveAPIView):
         except Report.DoesNotExist:
             logger.error(f"Report {self.kwargs['pk']} does not exist")
             raise Http404("Report not found")
-
 
 class ExportAllReportsView(APIView):
     permission_classes = [IsAuthenticated, IsAuthorizedForReports]
@@ -332,7 +326,6 @@ class ExportAllReportsView(APIView):
             filename=f"reports_{datetime.now().strftime('%Y%m%d_%H%M%S')}.zip"
         )
 
-
 class ListAppointmentsView(generics.ListAPIView):
     serializer_class = AppointmentSerializer
     permission_classes = [IsAuthenticated, IsDoctorOrNurse]
@@ -344,9 +337,15 @@ class ListAppointmentsView(generics.ListAPIView):
         if status:
             queryset = queryset.filter(status=status)
         if patient_id:
-            queryset = queryset.filter(patient_id=patient_id)
+            try:
+                patient_id = int(patient_id)
+                if not AddPatients.objects.filter(id=patient_id).exists():
+                    logger.warning(f"Patient ID {patient_id} does not exist for appointment query")
+                queryset = queryset.filter(patient_id=patient_id)
+            except ValueError:
+                logger.error(f"Invalid patient_id format: {patient_id}")
+        logger.debug(f"Fetching appointments for user {self.request.user.id}, status: {status or 'none'}, patient_id: {patient_id or 'none'}")
         return queryset
-
 
 class CreateAppointView(generics.CreateAPIView):
     serializer_class = AppointmentSerializer
@@ -354,12 +353,23 @@ class CreateAppointView(generics.CreateAPIView):
     permission_classes = [IsAuthenticated, IsDoctorOrNurse]
 
     def create(self, request, *args, **kwargs):
-        serializer = self.get_serializer(data=request.data)
+        logger.debug(f"Create appointment request by user: {request.user.id if request.user.is_authenticated else 'anonymous'}")
+        if not request.user.is_authenticated:
+            logger.error("Unauthenticated request to create appointment")
+            return Response(
+                {"detail": "Authentication credentials were not provided"},
+                status=status.HTTP_401_UNAUTHORIZED
+            )
+        serializer = self.get_serializer(data=request.data, context={'request': request})
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
         date = data['date']
         time = data['time']
         duration = data['duration']
+        patient = data['patient']
+        if not AddPatients.objects.filter(id=patient.id).exists():
+            logger.error(f"Patient ID {patient.id} does not exist")
+            return Response({"error": "Patient does not exist"}, status=status.HTTP_400_BAD_REQUEST)
         end_time = (datetime.combine(date, time) + timedelta(minutes=duration)).time()
         overlapping = Appointment.objects.filter(
             doctor=request.user,
@@ -368,22 +378,21 @@ class CreateAppointView(generics.CreateAPIView):
             time__gte=time
         ).exists()
         if overlapping:
+            logger.warning(f"Time slot conflict for user {request.user.id} on {date} at {time}")
             return Response({"error": "Time slot is already booked"}, status=status.HTTP_400_BAD_REQUEST)
         instance = serializer.save()
+        logger.info(f"Appointment {instance.id} created for patient {patient.id} ({patient.first_name} {patient.last_name}) by user {request.user.id}")
         return Response(serializer.data, status=status.HTTP_201_CREATED)
-
 
 class UpdateAppointView(generics.UpdateAPIView):
     serializer_class = AppointmentSerializer
     queryset = Appointment.objects.all()
     permission_classes = [IsAuthenticated, IsDoctorOrNurse]
 
-
 class DeleteAppointmentView(generics.DestroyAPIView):
     serializer_class = AppointmentSerializer
     queryset = Appointment.objects.all()
     permission_classes = [IsAuthenticated, IsDoctor]
-
 
 class AvailableSlotsView(APIView):
     permission_classes = [IsAuthenticated, IsDoctorOrNurse]
@@ -391,14 +400,15 @@ class AvailableSlotsView(APIView):
     def get(self, request):
         date_str = request.query_params.get('date')
         if not date_str:
+            logger.error("Date not provided for available slots query")
             return Response({"error": "Date is required"}, status=status.HTTP_400_BAD_REQUEST)
 
         try:
             target_date = datetime.strptime(date_str, '%Y-%m-%d').date()
         except ValueError:
+            logger.error(f"Invalid date format: {date_str}")
             return Response({"error": "Invalid date format"}, status=status.HTTP_400_BAD_REQUEST)
 
-        # Assume clinic hours: 9:00 AM to 5:00 PM, 30-min slots
         clinic_start = timezone.make_aware(datetime.combine(target_date, datetime.min.time()) + timedelta(hours=9))
         clinic_end = timezone.make_aware(datetime.combine(target_date, datetime.min.time()) + timedelta(hours=17))
         slot_duration = timedelta(minutes=30)
@@ -423,28 +433,27 @@ class AvailableSlotsView(APIView):
                 available_slots.append(slot_start)
             current_time += slot_duration
 
+        logger.debug(f"Available slots for {date_str}: {len(available_slots)} slots")
         return Response({"available_slots": available_slots})
-
 
 class ListInvitationsView(generics.ListAPIView):
     serializer_class = InvitationSerializer
     permission_classes = [IsAuthenticated, IsDoctorOrNurse]
 
     def get_queryset(self):
-        return Invitation.objects.filter(doctor=self.request.user)
-
+        queryset = Invitation.objects.filter(doctor=self.request.user)
+        logger.debug(f"Fetching invitations for user {self.request.user.id}")
+        return queryset
 
 class CreateInvitationView(generics.CreateAPIView):
     serializer_class = InvitationSerializer
     queryset = Invitation.objects.all()
     permission_classes = [IsAuthenticated, IsDoctorOrNurse]
 
-
 class AppointmentDetailView(generics.RetrieveAPIView):
     serializer_class = AppointmentSerializer
     queryset = Appointment.objects.all()
     permission_classes = [IsAuthenticated, IsDoctorOrNurse]
-
 
 class InvitationDetailView(generics.RetrieveAPIView):
     serializer_class = InvitationSerializer
