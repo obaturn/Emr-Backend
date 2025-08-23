@@ -10,6 +10,16 @@ from decouple import config
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
+EMAIL_BACKEND = "django.core.mail.backends.smtp.EmailBackend"
+EMAIL_HOST = "smtp.gmail.com"
+EMAIL_PORT = 587
+EMAIL_USE_TLS = True
+
+EMAIL_HOST_USER = config("EMAIL_HOST_USER")         # <-- use config here
+EMAIL_HOST_PASSWORD = config("EMAIL_HOST_PASSWORD") # <-- use config here
+DEFAULT_FROM_EMAIL = config("DEFAULT_FROM_EMAIL", default=EMAIL_HOST_USER)
+
+
 # Quick-start development settings - unsuitable for production
 SECRET_KEY = 'django-insecure-!cr)3&2nlz_ez$dbrhvzwp&wa^qu^-994-ac5+eij&gte3s%c+'
 DEBUG = True

@@ -4,7 +4,8 @@ from rest_framework_simplejwt.views import TokenRefreshView
 from .views import CreateAccountView, LoginView, AddPatientsView, PatientDetailView, DeletePatientView, \
     ListPatientsView, UpdatePatientView, ListReportsView, GenerateReportView, ViewReportView, RetrieveReportDataView, \
     ExportAllReportsView, ListAppointmentsView, DeleteAppointmentView, AvailableSlotsView, CreateAppointView, \
-    UpdateAppointView, ListInvitationsView, CreateInvitationView, AppointmentDetailView, InvitationDetailView
+    UpdateAppointView, ListInvitationsView, CreateInvitationView, AppointmentDetailView, InvitationDetailView, \
+    DiagnosticListCreateView, UserProfileView
 
 urlpatterns = [
     path('register/', CreateAccountView.as_view(), name='register'),
@@ -28,5 +29,7 @@ urlpatterns = [
     path('invitations/create/', CreateInvitationView.as_view(), name='create-invitation'),
     path('appointments/<int:pk>/', AppointmentDetailView.as_view(), name='appointment-detail'),
     path('invitations/<int:pk>/', InvitationDetailView.as_view(), name='invitation-detail'),
+    path('diagnostics/', DiagnosticListCreateView.as_view(), name='diagnostic-list-create'),
+    path('profile/', UserProfileView.as_view(), name='user-profile'),
 ]
 # Allow credentials (cookies, authorization headers)

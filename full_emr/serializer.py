@@ -6,13 +6,14 @@ from django.contrib.auth import get_user_model, authenticate
 from django.contrib.auth.password_validation import validate_password
 from rest_framework import serializers
 from rest_framework_simplejwt.tokens import RefreshToken
-from .models import User, AddPatients, Report, Appointment, Invitation
+from .models import User, AddPatients, Report, Appointment, Invitation, Diagnostic
 
 logger = logging.getLogger(__name__)
 
 User = get_user_model()
 
 class CreateAccountSerializer(serializers.ModelSerializer):
+    profile_image = serializers.CharField(required=False, allow_blank=True, allow_null=True)
     password = serializers.CharField(
         write_only=True,
         required=True,
@@ -294,3 +295,37 @@ class InvitationSerializer(serializers.ModelSerializer):
         invitation = super().create(validated_data)
         logger.info(f"Invitation {invitation.id} created for patient {invitation.patient.id} ({invitation.patient.first_name} {invitation.patient.last_name})")
         return invitation
+
+class DiagnosticSerializer(serializers.ModelSerializer):
+    patient_name = serializers.SerializerMethodField()
+    created_by_name = serializers.SerializerMethodField()
+    patient = serializers.PrimaryKeyRelatedField(
+        queryset=AddPatients.objects.all(),
+        write_only=True
+    )
+
+    class Meta:
+        model = Diagnostic
+        fields = ['id', 'patient', 'patient_name', 'test_type', 'result', 'date', 'notes', 'status', 'created_by',
+                  'created_by_name', 'created_at', 'updated_at']
+
+    def get_patient_name(self, obj):
+        return f"{obj.patient.first_name} {obj.patient.last_name}"
+
+    def get_created_by_name(self, obj):
+        return obj.created_by.username if obj.created_by else 'Unknown'
+
+class UserProfileSerializer(serializers.ModelSerializer):
+    profile_image = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    class Meta:
+        model = User
+        fields = [
+            'id', 'username', 'email', 'first_name', 'last_name', 'role',
+            'speciality', 'phone_number', 'license_number', 'profile_image'
+        ]
+        read_only_fields = ['id', 'username', 'role']
+
+        def validate_profile_image(self, value):
+            if value and len(value) > 2 * 1024 * 1024:  # ~2MB limit for base64
+                raise serializers.ValidationError("Image is too large. Maximum size is 2MB.")
+            return value

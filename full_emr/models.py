@@ -15,6 +15,7 @@ class User(AbstractUser):
     phone_number = models.CharField(max_length=30)
     country_code = models.CharField(max_length=5)
     license_number = models.CharField(max_length=50, blank=True, null=True)
+    profile_image = models.TextField(blank=True, null=True)
 
     last_login_ip = models.GenericIPAddressField(blank=True,null=True)
     last_login_at = models.DateTimeField(blank=True,null=True)
@@ -107,3 +108,27 @@ class Invitation(models.Model):
     preferred_dates = models.JSONField(default=list)  # e.g., ["2025-08-21", "2025-08-22"]
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='Pending')
     created_at = models.DateTimeField(auto_now_add=True)
+
+
+class Diagnostic(models.Model):
+    patient = models.ForeignKey('AddPatients', on_delete=models.CASCADE, related_name='diagnostics')
+    test_type = models.CharField(max_length=100)  # e.g., Blood Test, X-Ray
+    result = models.TextField(blank=True)  # Test results or findings
+    date = models.DateField()
+    notes = models.TextField(blank=True)
+    status = models.CharField(max_length=20, choices=[
+        ('pending', 'Pending'),
+        ('completed', 'Completed'),
+        ('abnormal', 'Abnormal'),
+    ], default='pending')
+    created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-date']
+
+    def __str__(self):
+        return f"{self.test_type} for {self.patient.first_name} {self.patient.last_name} on {self.date}"
+
+

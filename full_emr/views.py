@@ -3,6 +3,8 @@ import csv
 import zipfile
 from io import BytesIO
 from datetime import datetime, date, timedelta
+
+from django.core.mail import send_mail
 from django.http import FileResponse, Http404
 from django.conf import settings
 from django.utils import timezone
@@ -17,10 +19,10 @@ from reportlab.lib.pagesizes import letter
 from openpyxl import Workbook
 import logging
 
-from .models import AddPatients, Report, User, Appointment, Invitation
+from .models import AddPatients, Report, User, Appointment, Invitation, Diagnostic
 from .serializer import (
     CreateAccountSerializer, LoginSerializer, AddPatientSerializer, ReportSerializer,
-    GenerateReportSerializer, AppointmentSerializer, InvitationSerializer
+    GenerateReportSerializer, AppointmentSerializer, InvitationSerializer, DiagnosticSerializer, UserProfileSerializer
 )
 
 logger = logging.getLogger(__name__)
@@ -450,6 +452,64 @@ class CreateInvitationView(generics.CreateAPIView):
     queryset = Invitation.objects.all()
     permission_classes = [IsAuthenticated, IsDoctorOrNurse]
 
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data, context={'request': request})
+        serializer.is_valid(raise_exception=True)
+        invitation = serializer.save()
+
+        # Get patient email
+        patient_email = invitation.patient.email
+
+        if patient_email:
+            # Create a more detailed email message
+            subject = f"Appointment Invitation from {request.user.get_full_name()}"
+
+            # Format preferred dates for display
+            formatted_dates = []
+            for date_str in invitation.preferred_dates:
+                try:
+                    date_obj = datetime.strptime(date_str, '%Y-%m-%d')
+                    formatted_dates.append(date_obj.strftime('%B %d, %Y'))
+                except (ValueError, TypeError):
+                    continue
+
+            dates_list = "\n".join(
+                [f"• {date}" for date in formatted_dates]) if formatted_dates else "No specific dates suggested"
+
+            message = f"""
+Dear {invitation.patient.first_name or 'Patient'},
+
+You have been invited to schedule an appointment at our clinic.
+
+The following dates have been suggested for your appointment:
+{dates_list}
+
+Please log in to our patient portal to confirm your availability or suggest alternative dates.
+
+If you have any questions, please contact our office.
+
+Best regards,
+{request.user.get_full_name()}
+{request.user.role.title()}
+            """
+
+            try:
+                send_mail(
+                    subject,
+                    message.strip(),
+                    settings.DEFAULT_FROM_EMAIL,
+                    [patient_email],
+                    fail_silently=False,
+                )
+                logger.info(f"Invitation email sent to {patient_email} for invitation {invitation.id}")
+            except Exception as e:
+                logger.error(f"Failed to send invitation email to {patient_email}: {str(e)}")
+                # Don't fail the request if email fails, just log it
+        else:
+            logger.warning(f"Patient {invitation.patient.id} has no email address, cannot send invitation email")
+
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
 class AppointmentDetailView(generics.RetrieveAPIView):
     serializer_class = AppointmentSerializer
     queryset = Appointment.objects.all()
@@ -459,3 +519,39 @@ class InvitationDetailView(generics.RetrieveAPIView):
     serializer_class = InvitationSerializer
     queryset = Invitation.objects.all()
     permission_classes = [IsAuthenticated, IsDoctorOrNurse]
+
+class DiagnosticListCreateView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        diagnostics = Diagnostic.objects.all()
+        serializer = DiagnosticSerializer(diagnostics, many=True)
+        return Response(serializer.data)
+
+    def post(self, request):
+        serializer = DiagnosticSerializer(data=request.data)
+        if serializer.is_valid():
+            serializer.save(created_by=request.user)
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+class UserProfileView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        serializer = UserProfileSerializer(request.user)
+        return Response(serializer.data)
+
+    def put(self, request):
+        serializer = UserProfileSerializer(
+            request.user,
+            data=request.data,
+            partial=True
+        )
+
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data)
+
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
