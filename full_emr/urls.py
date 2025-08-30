@@ -5,7 +5,7 @@ from .views import CreateAccountView, LoginView, AddPatientsView, PatientDetailV
     ListPatientsView, UpdatePatientView, ListReportsView, GenerateReportView, ViewReportView, RetrieveReportDataView, \
     ExportAllReportsView, ListAppointmentsView, DeleteAppointmentView, AvailableSlotsView, CreateAppointView, \
     UpdateAppointView, ListInvitationsView, CreateInvitationView, AppointmentDetailView, InvitationDetailView, \
-    DiagnosticListCreateView, UserProfileView
+    DiagnosticListCreateView, UserProfileView, LabReportListCreateView, LabReportDetailView
 
 urlpatterns = [
     path('register/', CreateAccountView.as_view(), name='register'),
@@ -31,5 +31,7 @@ urlpatterns = [
     path('invitations/<int:pk>/', InvitationDetailView.as_view(), name='invitation-detail'),
     path('diagnostics/', DiagnosticListCreateView.as_view(), name='diagnostic-list-create'),
     path('profile/', UserProfileView.as_view(), name='user-profile'),
+    path('lab-reports/', LabReportListCreateView.as_view(), name='lab-report-list-create'),
+    path('lab-reports/<int:pk>/', LabReportDetailView.as_view(), name='lab-report-detail'),
 ]
 # Allow credentials (cookies, authorization headers)

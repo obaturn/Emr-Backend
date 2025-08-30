@@ -19,10 +19,11 @@ from reportlab.lib.pagesizes import letter
 from openpyxl import Workbook
 import logging
 
-from .models import AddPatients, Report, User, Appointment, Invitation, Diagnostic
+from .models import AddPatients, Report, User, Appointment, Invitation, Diagnostic, LabReport
 from .serializer import (
     CreateAccountSerializer, LoginSerializer, AddPatientSerializer, ReportSerializer,
-    GenerateReportSerializer, AppointmentSerializer, InvitationSerializer, DiagnosticSerializer, UserProfileSerializer
+    GenerateReportSerializer, AppointmentSerializer, InvitationSerializer, DiagnosticSerializer, UserProfileSerializer,
+    LabReportSerializer
 )
 
 logger = logging.getLogger(__name__)
@@ -555,3 +556,35 @@ class UserProfileView(APIView):
             return Response(serializer.data)
 
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+class LabReportListCreateView(generics.ListCreateAPIView):
+    serializer_class = LabReportSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        queryset = LabReport.objects.all()
+        if self.request.user.role != 'doctor':
+            queryset = queryset.filter(created_by=self.request.user)
+        logger.debug(f"Fetching lab reports for user {self.request.user.id}")
+        return queryset
+
+    def perform_create(self, serializer):
+        if self.request.user.role != 'doctor':
+            logger.error(f"User {self.request.user.id} with role {self.request.user.role} attempted to create lab report")
+            raise serializer.ValidationError("Only doctors can create lab reports.")
+        serializer.save(created_by=self.request.user)
+        logger.info(f"Lab report created by user {self.request.user.id} for patient {serializer.validated_data['patient'].id}")
+
+class LabReportDetailView(generics.RetrieveAPIView):
+    serializer_class = LabReportSerializer
+    queryset = LabReport.objects.all()
+    permission_classes = [IsAuthenticated]
+
+    def retrieve(self, request, *args, **kwargs):
+        lab_report = self.get_object()
+        if request.user.role != 'doctor' and lab_report.created_by != request.user:
+            logger.error(f"User {request.user.id} attempted to access lab report {lab_report.id} not owned")
+            raise Http404("Lab report not found")
+        logger.debug(f"Retrieving lab report {lab_report.id} for user {request.user.id}")
+        return Response(self.get_serializer(lab_report).data)
+

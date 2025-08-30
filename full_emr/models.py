@@ -131,4 +131,18 @@ class Diagnostic(models.Model):
     def __str__(self):
         return f"{self.test_type} for {self.patient.first_name} {self.patient.last_name} on {self.date}"
 
+class LabReport(models.Model):
+    patient = models.ForeignKey(AddPatients, on_delete=models.CASCADE, related_name='lab_reports')
+    test_type = models.CharField(max_length=100)
+    date = models.DateField()
+    notes = models.TextField(blank=True, null=True)
+    file = models.FileField(upload_to='lab_reports/', blank=True, null=True)
+    created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, related_name='lab_reports')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
 
+    class Meta:
+        ordering = ['-date']
+
+    def __str__(self):
+        return f"{self.test_type} for {self.patient.first_name} {self.patient.last_name} on {self.date}"

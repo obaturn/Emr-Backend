@@ -6,7 +6,7 @@ from django.contrib.auth import get_user_model, authenticate
 from django.contrib.auth.password_validation import validate_password
 from rest_framework import serializers
 from rest_framework_simplejwt.tokens import RefreshToken
-from .models import User, AddPatients, Report, Appointment, Invitation, Diagnostic
+from .models import User, AddPatients, Report, Appointment, Invitation, Diagnostic, LabReport
 
 logger = logging.getLogger(__name__)
 
@@ -329,3 +329,36 @@ class UserProfileSerializer(serializers.ModelSerializer):
             if value and len(value) > 2 * 1024 * 1024:  # ~2MB limit for base64
                 raise serializers.ValidationError("Image is too large. Maximum size is 2MB.")
             return value
+
+class LabReportSerializer(serializers.ModelSerializer):
+    patient_name = serializers.SerializerMethodField()
+    patient_id = serializers.PrimaryKeyRelatedField(
+        queryset=AddPatients.objects.all(),
+        source='patient',
+        write_only=True
+    )
+    file_url = serializers.SerializerMethodField()
+    created_by_name = serializers.SerializerMethodField(read_only=True)
+
+    class Meta:
+        model = LabReport
+        fields = [
+            'id', 'patient_id', 'patient_name', 'test_type', 'date',
+            'notes', 'file', 'file_url', 'created_by', 'created_by_name',
+            'created_at', 'updated_at'
+        ]
+        read_only_fields = [
+            'id', 'patient_name', 'created_by', 'created_at',
+            'updated_at', 'file_url', 'created_by_name'
+        ]
+
+    def get_patient_name(self, obj):
+        return f"{obj.patient.first_name} {obj.patient.last_name}"
+
+    def get_created_by_name(self, obj):
+        return obj.created_by.get_full_name() if obj.created_by else 'Unknown'
+
+    def get_file_url(self, obj):
+        if obj.file and hasattr(obj.file, 'url'):
+            return obj.file.url
+        return None
