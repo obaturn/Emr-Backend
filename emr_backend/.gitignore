@@ -20,5 +20,5 @@ staticfiles
 *.swp
 *.swo
 .DS_Store
-.env
+../../.env
 

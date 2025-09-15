@@ -6,7 +6,9 @@ from django.contrib.auth import get_user_model, authenticate
 from django.contrib.auth.password_validation import validate_password
 from rest_framework import serializers
 from rest_framework_simplejwt.tokens import RefreshToken
-from .models import User, AddPatients, Report, Appointment, Invitation, Diagnostic, LabReport
+from .models import User, AddPatients, Report, Appointment, Invitation, Diagnostic, LabReport, SocialHistory, \
+    FamilyHistory, Immunization, Allergy, VitalSigns, MedicalHistory, SupportRequest, SupportResponse, FeedbackResponse, \
+    Feedback, HealthCampaign, EducationalResource
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +28,8 @@ class CreateAccountSerializer(serializers.ModelSerializer):
         fields = [
             'username', 'email', 'password', 'password2',
             'first_name', 'last_name', 'role', 'speciality',
-            'phone_number', 'country_code', 'license_number'
+            'phone_number', 'country_code', 'license_number',
+            'profile_image'
         ]
         extra_kwargs = {
             'first_name': {'required': True},
@@ -73,65 +76,49 @@ class CreateAccountSerializer(serializers.ModelSerializer):
 
 class LoginSerializer(serializers.Serializer):
     email = serializers.EmailField()
-    password = serializers.CharField(
-        style={'input_type': 'password'},
-        trim_whitespace=False
-    )
+    password = serializers.CharField(style={'input_type': 'password'}, trim_whitespace=False)
     remember_me = serializers.BooleanField(default=False, required=False)
 
     def validate(self, attrs):
         email = attrs.get('email')
         password = attrs.get('password')
+        remember_me = attrs.get('remember_me', False)
 
-        if email and password:
-            user = authenticate(
-                request=self.context.get('request'),
-                username=email,
-                password=password
-            )
+        user = authenticate(
+            request=self.context.get('request'),
+            username=email,
+            password=password
+        )
+        if not user:
+            logger.error(f"Login failed for email: {email}")
+            raise serializers.ValidationError("Invalid credentials.")
 
-            if not user:
-                logger.error(f"Login failed for email: {email}")
-                raise serializers.ValidationError(
-                    "Unable to login with provided credentials.",
-                    code='authorization'
-                )
+        refresh = RefreshToken.for_user(user)
 
-            refresh = RefreshToken.for_user(user)
-            access_token = refresh.access_token
-
-            if attrs.get('remember_me'):
-                access_token.set_exp(lifetime=timedelta(days=7))
-                refresh.set_exp(lifetime=timedelta(days=30))
-
-            access_token['role'] = user.role
-            access_token['email'] = user.email
-
-            user.last_login_ip = self.context['request'].META.get('REMOTE_ADDR')
-            user.last_login_at = timezone.now()
-            user.save()
-
-            logger.info(f"User logged in: {user.email} (ID: {user.id})")
-            return {
-                'user': {
-                    'id': user.id,
-                    'email': user.email,
-                    'first_name': user.first_name,
-                    'last_name': user.last_name,
-                    'role': user.role,
-                    'speciality': user.speciality,
-                },
-                'tokens': {
-                    'access': str(access_token),
-                    'refresh': str(refresh),
-                }
-            }
+        # If remember_me is true, make refresh token last longer
+        if remember_me:
+            refresh.set_exp(lifetime=timedelta(days=30))  # 30 days
         else:
-            logger.error("Login attempt missing email or password")
-            raise serializers.ValidationError(
-                'Must include "email" and "password".',
-                code='authorization'
-            )
+            refresh.set_exp(lifetime=timedelta(days=1))   # default 1 day
+
+        access = refresh.access_token
+        # Optional: you can also make access token longer if you want
+        access.set_exp(lifetime=timedelta(hours=1))
+
+        return {
+            'user': {
+                'id': user.id,
+                'email': user.email,
+                'role': user.role,
+                'first_name': user.first_name,
+                'last_name': user.last_name
+            },
+            'tokens': {
+                'access': str(access),
+                'refresh': str(refresh)
+            }
+        }
+
 
 class AddPatientSerializer(serializers.ModelSerializer):
     name = serializers.SerializerMethodField(read_only=True)
@@ -362,3 +349,127 @@ class LabReportSerializer(serializers.ModelSerializer):
         if obj.file and hasattr(obj.file, 'url'):
             return obj.file.url
         return None
+
+
+class MedicalHistorySerializer(serializers.ModelSerializer):
+    created_by_name = serializers.CharField(source='created_by.get_full_name', read_only=True)
+
+    class Meta:
+        model = MedicalHistory
+        fields = '__all__'
+        read_only_fields = ['id', 'created_at', 'updated_at']
+
+class VitalSignsSerializer(serializers.ModelSerializer):
+    recorded_by_name = serializers.CharField(source='recorded_by.get_full_name', read_only=True)
+
+    class Meta:
+        model = VitalSigns
+        fields = [
+            'id', 'patient', 'recorded_at', 'blood_pressure_systolic',
+            'blood_pressure_diastolic', 'heart_rate', 'temperature',
+            'temperature_unit', 'respiratory_rate', 'oxygen_saturation',
+            'weight', 'height', 'bmi', 'notes', 'recorded_by_name'
+        ]
+        read_only_fields = ['id', 'recorded_by_name', 'bmi']
+
+
+
+class AllergySerializer(serializers.ModelSerializer):
+    created_by_name = serializers.CharField(source='created_by.get_full_name', read_only=True)
+
+    class Meta:
+        model = Allergy
+        fields = '__all__'
+        read_only_fields = ['id', 'created_at']
+
+
+class ImmunizationSerializer(serializers.ModelSerializer):
+    administered_by_name = serializers.CharField(source='administered_by.get_full_name', read_only=True)
+
+    class Meta:
+        model = Immunization
+        fields = '__all__'
+        read_only_fields = ['id', 'created_at']
+
+
+class FamilyHistorySerializer(serializers.ModelSerializer):
+    created_by_name = serializers.CharField(source='created_by.get_full_name', read_only=True)
+
+    class Meta:
+        model = FamilyHistory
+        fields = '__all__'
+        read_only_fields = ['id', 'created_at']
+
+
+class SocialHistorySerializer(serializers.ModelSerializer):
+    updated_by_name = serializers.CharField(source='updated_by.get_full_name', read_only=True)
+
+    class Meta:
+        model = SocialHistory
+        fields = '__all__'
+        read_only_fields = ['id', 'created_at', 'updated_at']
+
+
+class HealthCampaignSerializer(serializers.ModelSerializer):
+    created_by_name = serializers.CharField(source='created_by.get_full_name', read_only=True)
+
+    class Meta:
+        model = HealthCampaign
+        fields = '__all__'
+        read_only_fields = ['id', 'created_at', 'updated_at', 'created_by_name']
+
+
+class EducationalResourceSerializer(serializers.ModelSerializer):
+    author_name = serializers.CharField(source='author.get_full_name', read_only=True)
+    file_url = serializers.SerializerMethodField()
+
+    class Meta:
+        model = EducationalResource
+        fields = '__all__'
+        read_only_fields = ['id', 'created_at', 'updated_at', 'author_name', 'file_url']
+
+    def get_file_url(self, obj):
+        if obj.file:
+            return obj.file.url
+        return None
+
+
+class FeedbackSerializer(serializers.ModelSerializer):
+    user_name = serializers.CharField(source='user.get_full_name', read_only=True)
+    user_role = serializers.CharField(source='user.role', read_only=True)
+
+    class Meta:
+        model = Feedback
+        fields = '__all__'
+        read_only_fields = ['id', 'created_at', 'updated_at', 'user_name', 'user_role','user']
+
+
+class FeedbackResponseSerializer(serializers.ModelSerializer):
+    responder_name = serializers.CharField(source='responder.get_full_name', read_only=True)
+    responder_role = serializers.CharField(source='responder.role', read_only=True)
+
+    class Meta:
+        model = FeedbackResponse
+        fields = '__all__'
+        read_only_fields = ['id', 'created_at', 'responder_name', 'responder_role']
+
+
+class SupportRequestSerializer(serializers.ModelSerializer):
+    user_name = serializers.CharField(source='user.get_full_name', read_only=True)
+    user_role = serializers.CharField(source='user.role', read_only=True)
+    assigned_to_name = serializers.CharField(source='assigned_to.get_full_name', read_only=True, allow_null=True)
+
+    class Meta:
+        model = SupportRequest
+        fields = '__all__'
+        read_only_fields = ['id', 'created_at', 'updated_at', 'user_name', 'user_role', 'assigned_to_name','user']
+
+
+class SupportResponseSerializer(serializers.ModelSerializer):
+    responder_name = serializers.CharField(source='responder.get_full_name', read_only=True)
+    responder_role = serializers.CharField(source='responder.role', read_only=True)
+
+    class Meta:
+        model = SupportResponse
+        fields = '__all__'
+        read_only_fields = ['id', 'created_at', 'responder_name', 'responder_role']

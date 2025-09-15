@@ -36,7 +36,9 @@ INSTALLED_APPS = [
     'full_emr',
     'rest_framework',
     'corsheaders',
-    'rest_framework_simplejwt',  # Added for JWT
+    'rest_framework_simplejwt',
+    'channels',
+    'chat',
 ]
 
 MIDDLEWARE = [
@@ -158,4 +160,20 @@ TEMPLATES = [
             ],
         },
     },
+]
+# Channels / WebSocket settings
+ASGI_APPLICATION = "emr_backend.asgi.application"
+
+CHANNEL_LAYERS = {
+    "default": {
+        "BACKEND": "channels_redis.core.RedisChannelLayer",
+        "CONFIG": {
+            "hosts": [("127.0.0.1", 6379)],
+        },
+    },
+}
+
+CSRF_TRUSTED_ORIGINS = [
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
 ]
