@@ -4,6 +4,8 @@ Django settings for emr_backend project.
 import os
 from pathlib import Path
 from datetime import timedelta
+
+import dj_database_url
 from decouple import config
 
 
@@ -59,14 +61,7 @@ ROOT_URLCONF = 'emr_backend.urls'
 AUTH_USER_MODEL = "full_emr.User"
 
 DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.postgresql',
-        'NAME': config('DB_NAME'),
-        'USER': config('DB_USER'),
-        'PASSWORD': config('DB_PASSWORD'),
-        'HOST': config('DB_HOST'),
-        'PORT': config('DB_PORT', default='5432'),
-    }
+    'default': dj_database_url.parse(config('DATABASE_URL'))
 }
 
 AUTH_PASSWORD_VALIDATORS = [
