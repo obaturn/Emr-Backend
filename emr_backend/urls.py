@@ -1,10 +1,15 @@
 from django.conf import settings
 from django.conf.urls.static import static
 from django.contrib import admin
+from django.http import JsonResponse
 from django.urls import path, include
 from rest_framework_simplejwt.views import TokenRefreshView, TokenObtainPairView
 
+def home(request):
+    return JsonResponse({"message": "EMR backend is running"})
+
 urlpatterns = [
+    path('', home),
     path('admin/', admin.site.urls),
     path('api/', include('full_emr.urls')),
     path('api/', include('chat.urls')),

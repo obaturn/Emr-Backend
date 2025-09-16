@@ -24,8 +24,12 @@ DEFAULT_FROM_EMAIL = config("DEFAULT_FROM_EMAIL", default=EMAIL_HOST_USER)
 SECRET_KEY = config("SECRET_KEY")
 DEBUG = config("DEBUG", default=False, cast=bool)
 
-# On Render, you’ll add your domain later — for now allow all (safe in early testing)
-ALLOWED_HOSTS = ["*"]
+ALLOWED_HOSTS = [
+    "emr-backend-f7k2.onrender.com",
+    "localhost",
+    "127.0.0.1"
+]
+
 
 INSTALLED_APPS = [
     'django.contrib.admin',
