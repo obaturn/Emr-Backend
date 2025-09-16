@@ -366,24 +366,34 @@ class CreateAccountView(generics.CreateAPIView):
     serializer_class = CreateAccountSerializer
 
     def create(self, request, *args, **kwargs):
-        serializer = self.get_serializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        user = serializer.save()
-        refresh = RefreshToken.for_user(user)
-        logger.info(f"Account created for user: {user.email} (ID: {user.id})")
-        return Response({
-            'user': {
-                'id': user.id,
-                'email': user.email,
-                'role': user.role,
-                'first_name': user.first_name,
-                'last_name': user.last_name,
-            },
-            'tokens': {
-                'access': str(refresh.access_token),
-                'refresh': str(refresh),
-            }
-        }, status=status.HTTP_201_CREATED)
+        try:
+            serializer = self.get_serializer(data=request.data)
+            serializer.is_valid(raise_exception=True)
+            user = serializer.save()
+            refresh = RefreshToken.for_user(user)
+
+            logger.info(f"Account created for user: {user.email} (ID: {user.id})")
+
+            return Response({
+                'user': {
+                    'id': user.id,
+                    'email': user.email,
+                    'role': user.role,
+                    'first_name': user.first_name,
+                    'last_name': user.last_name,
+                },
+                'tokens': {
+                    'access': str(refresh.access_token),
+                    'refresh': str(refresh),
+                }
+            }, status=status.HTTP_201_CREATED)
+        except Exception as e:
+            logger.error(f"Registration failed: {e}", exc_info=True)
+            return Response(
+                {"error": str(e)},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
 
 class LoginView(generics.GenericAPIView):
     serializer_class = LoginSerializer
