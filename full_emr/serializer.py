@@ -8,7 +8,7 @@ from rest_framework import serializers
 from rest_framework_simplejwt.tokens import RefreshToken
 from .models import User, AddPatients, Report, Appointment, Invitation, Diagnostic, LabReport, SocialHistory, \
     FamilyHistory, Immunization, Allergy, VitalSigns, MedicalHistory, SupportRequest, SupportResponse, FeedbackResponse, \
-    Feedback, HealthCampaign, EducationalResource
+    Feedback, HealthCampaign, EducationalResource, OTP
 
 logger = logging.getLogger(__name__)
 
@@ -118,6 +118,69 @@ class LoginSerializer(serializers.Serializer):
                 'refresh': str(refresh)
             }
         }
+
+
+class ForgotPasswordSerializer(serializers.Serializer):
+    email = serializers.EmailField(required=True)
+
+    def validate_email(self, value):
+        if not User.objects.filter(email=value).exists():
+            raise serializers.ValidationError("No user found with this email address.")
+        return value
+
+
+class VerifyOTPSerializer(serializers.Serializer):
+    email = serializers.EmailField(required=True)
+    otp_code = serializers.CharField(max_length=6, required=True)
+
+    def validate(self, data):
+        email = data.get('email')
+        otp_code = data.get('otp_code')
+
+        try:
+            user = User.objects.get(email=email)
+            otp = OTP.objects.filter(
+                user=user,
+                otp_code=otp_code,
+                purpose='password_reset',
+                is_used=False
+            ).first()
+
+            if not otp or not otp.is_valid():
+                raise serializers.ValidationError("Invalid or expired OTP.")
+
+            data['user'] = user
+            data['otp'] = otp
+
+        except User.DoesNotExist:
+            raise serializers.ValidationError("User not found.")
+
+        return data
+
+
+class ResetPasswordSerializer(serializers.Serializer):
+    email = serializers.EmailField(required=True)
+    otp_code = serializers.CharField(max_length=6, required=True)
+    new_password = serializers.CharField(required=True, write_only=True)
+    confirm_password = serializers.CharField(required=True, write_only=True)
+
+    def validate(self, data):
+        if data['new_password'] != data['confirm_password']:
+            raise serializers.ValidationError("Passwords don't match.")
+
+        # Verify OTP first
+        otp_serializer = VerifyOTPSerializer(data={
+            'email': data['email'],
+            'otp_code': data['otp_code']
+        })
+
+        if not otp_serializer.is_valid():
+            raise serializers.ValidationError(otp_serializer.errors)
+
+        data['user'] = otp_serializer.validated_data['user']
+        data['otp'] = otp_serializer.validated_data['otp']
+
+        return data
 
 
 class AddPatientSerializer(serializers.ModelSerializer):

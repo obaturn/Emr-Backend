@@ -4,7 +4,7 @@ import zipfile
 from io import BytesIO
 from datetime import datetime, date, timedelta
 
-from django.core.mail import send_mail
+from django.core.mail import send_mail, message
 from django.http import FileResponse, Http404
 from django.conf import settings
 from django.utils import timezone
@@ -22,13 +22,14 @@ import logging
 
 from .models import AddPatients, Report, User, Appointment, Invitation, Diagnostic, LabReport, SocialHistory, \
     FamilyHistory, Immunization, Allergy, VitalSigns, MedicalHistory, HealthCampaign, EducationalResource, Feedback, \
-    SupportRequest, FeedbackResponse, SupportResponse
+    SupportRequest, FeedbackResponse, SupportResponse, OTP
 from .serializer import (
     CreateAccountSerializer, LoginSerializer, AddPatientSerializer, ReportSerializer,
     GenerateReportSerializer, AppointmentSerializer, InvitationSerializer, DiagnosticSerializer, UserProfileSerializer,
     LabReportSerializer, SocialHistorySerializer, FamilyHistorySerializer, ImmunizationSerializer, AllergySerializer,
     MedicalHistorySerializer, VitalSignsSerializer, HealthCampaignSerializer, EducationalResourceSerializer,
-    FeedbackSerializer, FeedbackResponseSerializer, SupportRequestSerializer, SupportResponseSerializer
+    FeedbackSerializer, FeedbackResponseSerializer, SupportRequestSerializer, SupportResponseSerializer,
+    ForgotPasswordSerializer, VerifyOTPSerializer, ResetPasswordSerializer
 )
 
 logger = logging.getLogger(__name__)
@@ -393,6 +394,70 @@ class LoginView(generics.GenericAPIView):
         logger.info(f"Login successful for user: {serializer.validated_data['user']['email']}")
         return Response(serializer.validated_data, status=status.HTTP_200_OK)
 
+
+class ForgotPasswordView(APIView):
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request):
+        serializer = ForgotPasswordSerializer(data=request.data)
+        if serializer.is_valid():
+            email = serializer.validated_data['email']
+
+            try:
+                user = User.objects.get(email=email)
+            except User.MultipleObjectsReturned:
+                logger.error(f"Multiple users found with email: {email}")
+                return Response({
+                    'message': 'Multiple accounts found with this email. Please contact support.'
+                }, status=status.HTTP_400_BAD_REQUEST)
+            except User.DoesNotExist:
+                logger.warning(f"No user found with email: {email}")
+                # For security, don't reveal if email exists or not
+                return Response({
+                    'message': 'If an account with this email exists, an OTP has been sent.'
+                }, status=status.HTTP_200_OK)
+
+            # Generate OTP
+            otp = OTP.generate_otp(user, purpose='password_reset')
+
+            # Send OTP via email
+            self.send_otp_email(user, otp.otp_code)
+
+            logger.info(f"OTP sent to {email} for password reset")
+
+            return Response({
+                'message': 'OTP has been sent to your registered email address.',
+                'email': email
+            }, status=status.HTTP_200_OK)
+
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    def send_otp_email(self, user, otp_code):
+        subject = "Password Reset Request - S10 Clinic"
+
+        message = f"""
+   Dear {user.get_full_name() or 'Valued Patient'},
+
+   We received a request to reset your password for your S10 Clinic account.
+
+   Here is your One-Time Password (OTP):
+
+   • {otp_code}
+
+   This OTP is valid for 10 minutes. Please do not share it with anyone for your account security.
+
+   If you did not request a password reset, you can safely ignore this email and your account will remain secure.
+
+   Best regards,
+   S10 Clinic Support Team
+       """
+
+        send_mail(
+            subject,
+            message.strip(),
+            settings.DEFAULT_FROM_EMAIL,
+            [user.email],
+            fail_silently=False,
+        )
 class IsDoctorOrNurse(permissions.BasePermission):
     def has_permission(self, request, view):
         return request.user.is_authenticated and request.user.role in ["doctor", "nurse"]
@@ -416,6 +481,46 @@ class AddPatientsView(generics.CreateAPIView):
             'patient': serializer.data
         }, status=status.HTTP_201_CREATED)
 
+
+class VerifyOTPView(APIView):
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request):
+        serializer = VerifyOTPSerializer(data=request.data)
+        if serializer.is_valid():
+            return Response({
+                'message': 'OTP verified successfully.',
+                'email': serializer.validated_data['user'].email
+            }, status=status.HTTP_200_OK)
+
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+class ResetPasswordView(APIView):
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request):
+        serializer = ResetPasswordSerializer(data=request.data)
+        if serializer.is_valid():
+            user = serializer.validated_data['user']
+            otp = serializer.validated_data['otp']
+            new_password = serializer.validated_data['new_password']
+
+            # Set new password
+            user.set_password(new_password)
+            user.save()
+
+            # Mark OTP as used
+            otp.is_used = True
+            otp.save()
+
+            logger.info(f"Password reset successfully for user: {user.email}")
+
+            return Response({
+                'message': 'Password has been reset successfully.'
+            }, status=status.HTTP_200_OK)
+
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 class HealthCampaignListCreateView(generics.ListCreateAPIView):
     serializer_class = HealthCampaignSerializer

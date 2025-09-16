@@ -1,6 +1,11 @@
+import random
+from datetime import timedelta
+
 from django.contrib.auth.models import AbstractUser
 from django.core.validators import MinValueValidator, MaxValueValidator
 from django.db import models
+from django.utils import timezone
+
 
 class User(AbstractUser):
     DOCTOR = 'doctor'
@@ -19,14 +24,49 @@ class User(AbstractUser):
     country_code = models.CharField(max_length=5)
     license_number = models.CharField(max_length=50, blank=True, null=True)
     profile_image = models.TextField(blank=True, null=True)
+    email = models.EmailField(unique=True)
 
     last_login_ip = models.GenericIPAddressField(blank=True,null=True)
     last_login_at = models.DateTimeField(blank=True,null=True)
 
+
 def __str__(self):
     return f"{self.get_full_name()} ({self.get_role_display()})"
-# Create your models here.
 
+
+class OTP(models.Model):
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='otps')
+    otp_code = models.CharField(max_length=6)
+    created_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField()
+    is_used = models.BooleanField(default=False)
+    purpose = models.CharField(max_length=20, default='password_reset')
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"OTP for {self.user.email} - {self.otp_code}"
+
+    def is_valid(self):
+        return not self.is_used and timezone.now() < self.expires_at
+
+    @classmethod
+    def generate_otp(cls, user, purpose='password_reset', expiry_minutes=10):
+        # Generate 4-digit random number
+        otp_code = str(random.randint(1000, 9999))
+
+        # Invalidate previous OTPs for the same purpose
+        cls.objects.filter(user=user, purpose=purpose, is_used=False).update(is_used=True)
+
+        # Create new OTP
+        expires_at = timezone.now() + timedelta(minutes=expiry_minutes)
+        return cls.objects.create(
+            user=user,
+            otp_code=otp_code,
+            expires_at=expires_at,
+            purpose=purpose
+        )
 class AddPatients(models.Model):
     CATEGORY_CHOICES = [
         ("General", "General"),

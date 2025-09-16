@@ -12,7 +12,7 @@ from .views import CreateAccountView, LoginView, AddPatientsView, PatientDetailV
     SocialHistoryDetailView, FeedbackListCreateView, FeedbackDetailView, FeedbackResponseListCreateView, \
     SupportRequestListCreateView, SupportRequestDetailView, SupportResponseListCreateView, health_promotion_stats, \
     EducationalResourceDetailView, EducationalResourceListCreateView, HealthCampaignDetailView, \
-    HealthCampaignListCreateView
+    HealthCampaignListCreateView, ForgotPasswordView, VerifyOTPView, ResetPasswordView
 
 urlpatterns = [
     path('register/', CreateAccountView.as_view(), name='register'),
@@ -65,6 +65,9 @@ urlpatterns = [
     path('support/requests/<int:pk>/', SupportRequestDetailView.as_view(), name='support_request_detail'),
     path('support/requests/<int:support_request_id>/responses/', SupportResponseListCreateView.as_view(),name='support_responses'),
     path('health-promotion/stats/', health_promotion_stats, name='health_promotion_stats'),
+    path('auth/forgot-password/', ForgotPasswordView.as_view(), name='forgot-password'),
+    path('auth/verify-otp/', VerifyOTPView.as_view(), name='verify-otp'),
+    path('auth/reset-password/', ResetPasswordView.as_view(), name='reset-password'),
 ]
 
 
