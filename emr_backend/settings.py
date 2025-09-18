@@ -128,9 +128,8 @@ CORS_ALLOW_ALL_ORIGINS = False  # Changed to False for security
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:3000",
     "http://127.0.0.1:3000",
-    "https://emr-backend-f7k2.onrender.com",  # Your backend domain
-    # Add your frontend domain here when you deploy it
-    # "https://your-frontend-domain.onrender.com",
+    "https://emr-backend-f7k2.onrender.com",
+    "https://emr-front-end-dy8a.vercel.app/"
 ]
 
 CORS_ALLOW_CREDENTIALS = True
